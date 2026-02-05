@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 ## Parametric portfolio policies based on stock characteristics
 
 This repository implements and extends the portfolio optimization framework proposed by "Parametric Portfolio Policies: Exploiting Characteristics in the Cross-Section of Equity Returns" by Michael W. Brandt, Pedro Santa-Clara and Rossen Valkanov (BSV). It trains characteristic-driven portfolio policies on a processed U.S. equity panel, with optional macro interactions and an optional restricted JKP characteristic set. Portfolio weights are chosen to maximize mean-variance preferences, and can be either a linear function of stock characteristics (following BSV) or a neural network.
@@ -131,3 +132,6 @@ References
 
 License
 This repository is intended for educational and research demonstration purposes.
+=======
+# ML_portfolio
+>>>>>>> 89972bac061293e9cae8b50e7d1670df6c0e7d79
