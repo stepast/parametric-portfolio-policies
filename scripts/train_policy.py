@@ -10,7 +10,7 @@ Outputs are written to:
     data/processed/results/
 """
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 import pandas as pd
 
@@ -67,31 +67,6 @@ NN_GRID = {
     "l2": [0.0, 1e-6, 1e-5],
 }
 
-
-def _load_jkp_characteristic_list(raw_dir) -> list[str]:
-    """Load the restricted JKP characteristic list from Factor_Details.xlsx."""
-    factor_details_path = raw_dir / "Factor_Details.xlsx"
-    if not factor_details_path.exists():
-        raise FileNotFoundError(
-            f"Factor_Details.xlsx not found at {factor_details_path}. "
-            "Download it and place it in data/raw."
-        )
-
-    details = pd.read_excel(factor_details_path)
-    if "abr_jkp" not in details.columns:
-        raise KeyError(
-            "Column 'abr_jkp' not found in Factor_Details.xlsx. "
-            "Check the JKP factor details file."
-        )
-
-    jkp_list = (
-        details.loc[details["abr_jkp"].notna(), "abr_jkp"]
-        .astype(str)
-        .unique()
-        .tolist()
-    )
-    print(f"Loaded {len(jkp_list)} JKP characteristics from Factor_Details.xlsx")
-    return jkp_list
 
 def load_jkp_characteristics(raw_dir: Path) -> list[str]:
     """Load JKP characteristic list from Factor_Details.xlsx."""
@@ -270,14 +245,16 @@ def main() -> None:
         rows.append({"model": model_name, **res["overall"]})
 
     # Linear policy
-    train_lin = TrainConfig(**TRAIN_CFG.__dict__)
-    train_lin.risk_aversion = RISK_AVERSION
-    train_lin.policy_mode = POLICY_MODE
-    train_lin.gross_leverage = GROSS_LEVERAGE
-    train_lin.epochs = EPOCHS_LINEAR
-    train_lin.lr = 1e-2
-    train_lin.l1 = 0.0
-    train_lin.l2 = 0.0
+    train_lin = replace(
+        TRAIN_CFG,
+        risk_aversion=RISK_AVERSION,
+        policy_mode=POLICY_MODE,
+        gross_leverage=GROSS_LEVERAGE,
+        epochs=EPOCHS_LINEAR,
+        lr=1e-2,
+        l1=0.0,
+        l2=0.0,
+    )
 
     res_lin = run_portfolio_policy_with_features(
         df=df_clean,
@@ -293,14 +270,16 @@ def main() -> None:
     record("Linear", res_lin)
 
     # MLP policy
-    train_nn = TrainConfig(**TRAIN_CFG.__dict__)
-    train_nn.risk_aversion = RISK_AVERSION
-    train_nn.policy_mode = POLICY_MODE
-    train_nn.gross_leverage = GROSS_LEVERAGE
-    train_nn.epochs = EPOCHS_NN
-    train_nn.lr = 1e-3
-    train_nn.l1 = 0.0
-    train_nn.l2 = 0.0
+    train_nn = replace(
+        TRAIN_CFG,
+        risk_aversion=RISK_AVERSION,
+        policy_mode=POLICY_MODE,
+        gross_leverage=GROSS_LEVERAGE,
+        epochs=EPOCHS_NN,
+        lr=1e-3,
+        l1=0.0,
+        l2=0.0,
+    )
 
     res_nn = run_portfolio_policy_with_features(
         df=df_clean,

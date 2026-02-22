@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Literal
 
 import numpy as np
 import pandas as pd
@@ -61,7 +61,7 @@ def train_one_split_policy(
     seed: int = 0,
     train_verbose: bool = False,
     log_every: int = 1,
-) -> Tuple[torch.nn.Module, Dict[str, float]]:
+) -> tuple[torch.nn.Module, dict[str, float]]:
     seed = int(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -87,8 +87,8 @@ def train_one_split_policy(
         )
 
     best_val_obj = float("inf")
-    best_state: Optional[Dict[str, torch.Tensor]] = None
-    best_epoch: Optional[int] = None
+    best_state: dict[str, torch.Tensor] | None = None
+    best_epoch: int | None = None
 
     bad_epochs = 0
     last_epoch = -1
@@ -210,7 +210,7 @@ def tune_policy_hyperparams(
     seed: int,
     train_verbose: bool = False,
     log_every: int = 1,
-) -> Tuple[object, Dict[str, float]]:
+) -> tuple[object, dict[str, float]]:
     """
     Grid search hyperparameters by MINIMIZING validation objective.
 
@@ -219,7 +219,7 @@ def tune_policy_hyperparams(
         raise ValueError("lr_grid, l1_grid, l2_grid must be non-empty when tuning.")
 
     best_cfg = base_cfg
-    best_val_metrics: Dict[str, float] = {}
+    best_val_metrics: dict[str, float] = {}
     best_val_obj = float("inf")
 
     trial = 0
@@ -258,21 +258,20 @@ def tune_policy_hyperparams(
 def run_portfolio_policy_with_features(
     *,
     df: pd.DataFrame,
-    feature_builder: Callable[..., Dict[str, Any]],
+    feature_builder: Callable[..., dict[str, Any]],
     model_cls: type[torch.nn.Module],
-    model_kwargs: Dict[str, Any],
+    model_kwargs: dict[str, Any],
     model_name: str,
     base_cfg: "TrainConfig",
     tune_hyperparams: bool = False,
-    tune_grids: Optional[Dict[str, Sequence[float]]] = None,
+    tune_grids: dict[str, Sequence[float]] | None = None,
     seed: int = 0,
     verbose: bool = True,
     train_verbose: bool = False,
     log_every: int = 1,
-    # ---- NEW: ensemble options ----
     ensemble_n: int = 1,
     ensemble_seed_stride: int = 10_000,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     GKX-style rolling OOS evaluation for portfolio policies.
 
@@ -293,13 +292,13 @@ def run_portfolio_policy_with_features(
     if int(ensemble_n) < 1:
         raise ValueError("ensemble_n must be >= 1")
 
-    per_year_records: List[Dict[str, Any]] = []
-    chosen_params: Dict[int, Dict[str, float]] = {}
+    per_year_records: list[dict[str, Any]] = []
+    chosen_params: dict[int, dict[str, float]] = {}
 
     # Full OOS monthly series for global metrics
-    oos_r: List[float] = []
-    oos_r_exc: List[float] = []
-    oos_to: List[float] = []
+    oos_r: list[float] = []
+    oos_r_exc: list[float] = []
+    oos_to: list[float] = []
     
     train_years = base_cfg.train_years
     val_years = base_cfg.val_years
@@ -352,7 +351,7 @@ def run_portfolio_policy_with_features(
         # Choose cfg (tuned or base)
         # -------------------------
         cfg_used = base_cfg
-        val_info: Dict[str, float] = {}
+        val_info: dict[str, float] = {}
 
         if tune_hyperparams:
             grids = tune_grids or {}
@@ -380,8 +379,8 @@ def run_portfolio_policy_with_features(
         # -------------------------
         # Train model
         # -------------------------
-        models: List[torch.nn.Module] = []
-        member_metrics: List[Dict[str, float]] = []
+        models: list[torch.nn.Module] = []
+        member_metrics: list[dict[str, float]] = []
 
         for m in range(int(ensemble_n)):
             member_seed = int(seed + 1_000_000 * test_year + m * int(ensemble_seed_stride))
@@ -445,7 +444,7 @@ def run_portfolio_policy_with_features(
             val_obj_diag = float(np.mean([m.get("val_obj", np.nan) for m in member_metrics]))
             val_sr_diag  = float(np.mean([m.get("val_ann_sharpe_excess", np.nan) for m in member_metrics]))
 
-        rec: Dict[str, Any] = {
+        rec: dict[str, Any] = {
             "test_year": test_year,
             "ann_mean": ann_mean,
             "ann_vol": ann_vol,
@@ -497,7 +496,7 @@ def run_portfolio_policy_with_features(
 
     overall = _compute_overall_metrics(oos_r_arr, oos_r_exc_arr, oos_to_arr)
 
-    out: Dict[str, Any] = {"per_year": per_year, "overall": overall}
+    out: dict[str, Any] = {"per_year": per_year, "overall": overall}
     if tune_hyperparams:
         out["chosen_params"] = chosen_params
     return out
