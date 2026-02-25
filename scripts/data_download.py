@@ -71,6 +71,22 @@ def download_macro_predictors(sheet_id: str, tab_name: str) -> pd.DataFrame:
 
     return df
 
+def download_factor_details(raw_dir: Path) -> None:
+    """Download JKP Factor_Details.xlsx from the bkelly-lab GitHub repository."""
+    url = (
+        "https://raw.githubusercontent.com/bkelly-lab/jkp-data"
+        "/main/data/factor_details.xlsx"
+    )
+    out_path = raw_dir / "Factor_Details.xlsx"
+    if out_path.exists():
+        logging.info("Factor_Details.xlsx already exists, skipping download.")
+        return
+
+    logging.info("Downloading Factor_Details.xlsx from GitHub...")
+    r = requests.get(url, timeout=30)
+    r.raise_for_status()
+    out_path.write_bytes(r.content)
+    logging.info("Saved Factor_Details.xlsx to %s", out_path)
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -81,6 +97,9 @@ def main() -> None:
     jkp = download_jkp_usa()
     jkp_path = RAW_DIR / "JKP_US_raw_full.parquet"
     jkp.to_parquet(jkp_path, index=False)
+    
+    logging.info("Downloading Factor_Details.xlsx...")
+    download_factor_details(RAW_DIR)
 
     logging.info("Downloading macro predictors...")
     sheet_id = "1bM7vCWd3WOt95Sf9qjLPZjoiafgF_8EG"
