@@ -67,6 +67,10 @@ NN_GRID = {
     "l2": [0.0, 1e-6, 1e-5],
 }
 
+# Diagnostics / placebo
+SHUFFLE_RETURNS_WITHIN_MONTH = False
+RUN_ZERO_BASELINE = False
+AUDIT_ALIGNMENT = False
 
 def load_jkp_characteristics(raw_dir: Path) -> list[str]:
     """Load JKP characteristic list from Factor_Details.xlsx."""
@@ -124,6 +128,8 @@ def main() -> None:
         )
 
     df = pd.read_parquet(processed_path)
+    # Label month (t+1) used only for split boundaries to avoid look-ahead
+    df["label_eom"] = df["eom"] + pd.offsets.MonthEnd(1)
     print(f"\nLoaded: {len(df):,} rows, {len(df.columns)} columns")
 
     # -------------------------------------------------------------------
@@ -190,11 +196,14 @@ def main() -> None:
     X, y, df_clean = prepare_features_and_target(
         df,
         feature_cols=feature_cols,
-        target_col = "ret_lead1m",
-        required_cols = ["ret_exc_lead1m"]
+        target_col = "ret_exc_lead1m",
+        required_cols = ["ret_exc_lead1m"],
+        filter_on_target=False,
     )
     
     assert len(df_clean) == X.shape[0] == y.shape[0], "X/y/df_clean misalignment"
+
+    # Optional diagnostics are disabled by default.
 
     print(f"\nFeature matrix: {X.shape}")
     print(f"Target: {y.shape}")
@@ -210,6 +219,8 @@ def main() -> None:
         interactions=bool(MACRO_INTERACTIONS),
         ff49_col="ff49",
         date_col=TRAIN_CFG.date_col,
+        char_method="rank",
+        char_impute="median",
     )
     feature_builder = make_feature_builder(
         X_base=X,
@@ -231,6 +242,7 @@ def main() -> None:
         f"test starts {TRAIN_CFG.test_start_year}"
     )
     print("Policy mode        :", POLICY_MODE)
+    print("Gross leverage     :", GROSS_LEVERAGE)
     print("Risk aversion      :", RISK_AVERSION)
 
     # -------------------------------------------------------------------
@@ -251,7 +263,7 @@ def main() -> None:
         policy_mode=POLICY_MODE,
         gross_leverage=GROSS_LEVERAGE,
         epochs=EPOCHS_LINEAR,
-        lr=1e-2,
+        lr=1e-3,
         l1=0.0,
         l2=0.0,
     )
@@ -263,6 +275,7 @@ def main() -> None:
         model_kwargs={"bias": True},
         model_name = "linear",
         base_cfg=train_lin,
+        split_date_col="label_eom",
         tune_hyperparams=TUNE_HYPERPARAMS,
         tune_grids=LINEAR_GRID,
         verbose=True,
@@ -290,6 +303,7 @@ def main() -> None:
                       "use_batchnorm": True},
         model_name = "MLP",
         base_cfg=train_nn,
+        split_date_col="label_eom",
         tune_hyperparams=TUNE_HYPERPARAMS,
         tune_grids=NN_GRID,
         verbose=True,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Sequence
 
 import numpy as np
 import pandas as pd
@@ -108,7 +108,8 @@ def train_one_split_policy(
             compute_turnover=False,
         )
 
-        train_obj = mean_variance_loss(r_train, risk_aversion=float(cfg.risk_aversion))
+        # Optimize on excess returns for consistency with evaluation
+        train_obj = mean_variance_loss(r_train_exc, risk_aversion=float(cfg.risk_aversion))
 
         pen_l1 = torch.zeros((), device=r_train.device)
         pen_l2 = torch.zeros((), device=r_train.device)
@@ -131,7 +132,7 @@ def train_one_split_policy(
                 gross_leverage=cfg.gross_leverage,
                 compute_turnover=False,
             )
-            val_obj_t = mean_variance_loss(r_val, risk_aversion=float(cfg.risk_aversion))
+            val_obj_t = mean_variance_loss(r_val_exc, risk_aversion=float(cfg.risk_aversion))
             val_obj = float(val_obj_t.detach().cpu().item())
             
             if scheduler is not None and np.isfinite(val_obj):
@@ -263,6 +264,7 @@ def run_portfolio_policy_with_features(
     model_kwargs: dict[str, Any],
     model_name: str,
     base_cfg: "TrainConfig",
+    split_date_col: str = "eom",
     tune_hyperparams: bool = False,
     tune_grids: dict[str, Sequence[float]] | None = None,
     seed: int = 0,
@@ -281,6 +283,7 @@ def run_portfolio_policy_with_features(
     - Evaluate on TEST, store per-year metrics
     - Compute "overall" metrics on concatenated OOS monthly series
     - Optional ensemble averaging of *scores* (ensemble_n > 1)
+    - Split boundaries are defined by split_date_col (e.g., label month)
 
     Returns:
       {
@@ -291,6 +294,8 @@ def run_portfolio_policy_with_features(
     """
     if int(ensemble_n) < 1:
         raise ValueError("ensemble_n must be >= 1")
+    if split_date_col not in df.columns:
+        raise KeyError(f"split_date_col '{split_date_col}' not found in DataFrame")
 
     per_year_records: list[dict[str, Any]] = []
     chosen_params: dict[int, dict[str, float]] = {}
@@ -307,7 +312,7 @@ def run_portfolio_policy_with_features(
 
     for split in iter_gkx_splits(
         df=df,
-        date_col="eom",
+        date_col=split_date_col,
         train_years=train_years,
         val_years=val_years,
         test_start_year=test_start_year,
@@ -340,9 +345,17 @@ def run_portfolio_policy_with_features(
 
         K = int(X_train.shape[1])
 
-        train_batches = make_monthly_batches(df_train, X_train)
-        val_batches   = make_monthly_batches(df_val,   X_val)
-        test_batches  = make_monthly_batches(df_test,  X_test)
+        label_col = "label_eom" if "label_eom" in df.columns else None
+        ret_exc_col = "ret_exc_lead1m"
+        train_batches = make_monthly_batches(
+            df_train, X_train, label_date_col=label_col, ret_exc_next_col=ret_exc_col
+        )
+        val_batches = make_monthly_batches(
+            df_val, X_val, label_date_col=label_col, ret_exc_next_col=ret_exc_col
+        )
+        test_batches = make_monthly_batches(
+            df_test, X_test, label_date_col=label_col, ret_exc_next_col=ret_exc_col
+        )
 
         def build_model() -> torch.nn.Module:
             return model_cls(K, **model_kwargs)
@@ -444,8 +457,15 @@ def run_portfolio_policy_with_features(
             val_obj_diag = float(np.mean([m.get("val_obj", np.nan) for m in member_metrics]))
             val_sr_diag  = float(np.mean([m.get("val_ann_sharpe_excess", np.nan) for m in member_metrics]))
 
+        test_year_label = test_year
+        if test_batches and test_batches[0].label_date is not None:
+            years = [pd.to_datetime(b.label_date).year for b in test_batches]
+            if len(set(years)) != 1:
+                raise ValueError(f"Non-constant return year in test batches: {sorted(set(years))[:5]}")
+            test_year_label = int(years[0])
+
         rec: dict[str, Any] = {
-            "test_year": test_year,
+            "test_year": test_year_label,
             "ann_mean": ann_mean,
             "ann_vol": ann_vol,
             "ann_sharpe_excess": ann_sr,
@@ -480,9 +500,8 @@ def run_portfolio_policy_with_features(
 
         if verbose:
             print(
-                f"{test_year} {model_name} | mean={ann_mean:.3f} vol={ann_vol:.3f}  "
-                f"SR(excess)={ann_sr:.3f} TO={mean_to:.3f} SR_tot={SR_prov:.3f} "
-                f"l1={float(cfg_used.l1)} l2={float(cfg_used.l2)}"
+                f"{test_year_label} {model_name} | mean={ann_mean:.3f} vol={ann_vol:.3f}  "
+                f"SR(excess)={ann_sr:.3f} TO={mean_to:.3f} SR_tot={SR_prov:.3f}"
             )
 
     if not per_year_records:

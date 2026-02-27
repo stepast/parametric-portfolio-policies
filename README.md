@@ -121,7 +121,8 @@ For each run, the script writes:
 Models included
 
 The default script trains and evaluates:
-- Linear policy - Neural policy
+- Linear policy
+- Neural policy
 ---
 
 References
@@ -131,4 +132,3 @@ References
 
 License
 This repository is intended for educational and research demonstration purposes.
-

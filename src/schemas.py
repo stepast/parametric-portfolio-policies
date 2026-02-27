@@ -13,6 +13,8 @@ class FeatureConfig:
     date_col: str = "eom"
     quantile_range: tuple[float, float] = (25.0, 75.0)
     interactions: bool = False
+    char_method: Literal["zscore", "rank"] = "rank"
+    char_impute: Literal["median", "none"] = "median"
 
 
 @dataclass
@@ -26,7 +28,7 @@ class TrainConfig:
     train_years: int = 25
     val_years: int = 5
     test_start_year: int = 2000
-    test_end_year: int | None = None
+    test_end_year: int = 2024
     seed: int = 0
 
     # ---- Portfolio-policy training hyperparameters ----
@@ -44,10 +46,10 @@ class TrainConfig:
 
     # ---- Early stopping / scheduler ----
     patience: int = 10
-    min_delta: float = 1e-6
+    min_delta: float = 1e-4
 
     use_plateau_scheduler: bool = True
     plateau_factor: float = 0.5
-    plateau_patience: int = 1
+    plateau_patience: int = 3
     plateau_min_lr: float = 1e-6
     plateau_threshold: float | None = None  # if None, use min_delta

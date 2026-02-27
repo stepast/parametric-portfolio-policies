@@ -11,6 +11,7 @@ def make_monthly_batches(
     df_split: pd.DataFrame,
     X_split: np.ndarray,
     date_col: str = "eom",
+    label_date_col: str | None = None,
     id_col: str = "id",
     ret_next_col: str = "ret_lead1m",
     ret_exc_next_col: str = "ret_exc_lead1m",
@@ -33,11 +34,6 @@ def make_monthly_batches(
         r_next = g[ret_next_col].to_numpy(dtype=np.float32)
         r_exc_next = g[ret_exc_next_col].to_numpy(dtype=np.float32)
 
-        if not np.isfinite(r_next).all():
-            raise ValueError(f"Non-finite values found in {ret_next_col} for month {date}.")
-        if not np.isfinite(r_exc_next).all():
-            raise ValueError(f"Non-finite values found in {ret_exc_next_col} for month {date}.")
-
         r_next_t = torch.as_tensor(r_next, dtype=torch.float32)
         r_exc_next_t = torch.as_tensor(r_exc_next, dtype=torch.float32)
 
@@ -50,8 +46,16 @@ def make_monthly_batches(
 
         ids = g[id_col].to_numpy()
 
+        label_date = None
+        if label_date_col is not None and label_date_col in g.columns:
+            label_vals = g[label_date_col].to_numpy()
+            label_date = label_vals[0] if len(label_vals) else None
+            if len(label_vals) and not np.all(label_vals == label_vals[0]):
+                raise ValueError(f"Non-constant label dates within month {date}.")
+
         batches.append(MonthlyBatch(
             date=date,
+            label_date=label_date,
             ids=ids,
             X=X_t,
             r_next=r_next_t,

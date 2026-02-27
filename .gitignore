@@ -29,8 +29,12 @@ data/processed/*
 # Keep folder structure
 !data/raw/.gitkeep
 !data/processed/.gitkeep
-!data/processed/results/
+data/processed/results/*
 !data/processed/results/.gitkeep
 
 # Optional: logs / outputs
 *.log
+
+# Diagnostics (local only)
+scripts/train_policy_diagnostics.py
+src/training_diagnostics.py

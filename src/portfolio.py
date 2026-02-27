@@ -106,6 +106,7 @@ def turnover_by_id(
 @dataclass
 class MonthlyBatch:
     date: object             
+    label_date: object | None
     ids: np.ndarray          
     X: torch.Tensor          
     r_next: torch.Tensor     
@@ -147,8 +148,23 @@ def run_model_on_batches(
             gross_leverage=gross_leverage, # float or None
         )
 
-        r_list.append(portfolio_return(w, b.r_next))
-        r_exc_list.append(portfolio_return(w, b.r_exc_next))
+        # If some returns are missing, compute realized return on valid names only
+        valid_mask = torch.isfinite(b.r_next) & torch.isfinite(b.r_exc_next)
+        if valid_mask.all():
+            r_list.append(portfolio_return(w, b.r_next))
+            r_exc_list.append(portfolio_return(w, b.r_exc_next))
+        else:
+            w_valid = w[valid_mask]
+            r_next_valid = b.r_next[valid_mask]
+            r_exc_valid = b.r_exc_next[valid_mask]
+
+            if w_valid.numel() == 0:
+                r_list.append(torch.zeros((), dtype=w.dtype, device=w.device))
+                r_exc_list.append(torch.zeros((), dtype=w.dtype, device=w.device))
+            else:
+                w_valid = _normalize_simplex(w_valid, eps=1e-12)
+                r_list.append(portfolio_return(w_valid, r_next_valid))
+                r_exc_list.append(portfolio_return(w_valid, r_exc_valid))
 
         if compute_turnover:
             if prev_w is not None and prev_ids is not None:
@@ -211,8 +227,23 @@ def run_ensemble_on_batches(
             gross_leverage=gross_leverage,
         )
 
-        r_list.append(portfolio_return(w, b.r_next))
-        r_exc_list.append(portfolio_return(w, b.r_exc_next))
+        # If some returns are missing, compute realized return on valid names only
+        valid_mask = torch.isfinite(b.r_next) & torch.isfinite(b.r_exc_next)
+        if valid_mask.all():
+            r_list.append(portfolio_return(w, b.r_next))
+            r_exc_list.append(portfolio_return(w, b.r_exc_next))
+        else:
+            w_valid = w[valid_mask]
+            r_next_valid = b.r_next[valid_mask]
+            r_exc_valid = b.r_exc_next[valid_mask]
+
+            if w_valid.numel() == 0:
+                r_list.append(torch.zeros((), dtype=w.dtype, device=w.device))
+                r_exc_list.append(torch.zeros((), dtype=w.dtype, device=w.device))
+            else:
+                w_valid = _normalize_simplex(w_valid, eps=1e-12)
+                r_list.append(portfolio_return(w_valid, r_next_valid))
+                r_exc_list.append(portfolio_return(w_valid, r_exc_valid))
 
         if compute_turnover:
             if prev_w is not None and prev_ids is not None:
