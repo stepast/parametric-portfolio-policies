@@ -1,6 +1,6 @@
 ## Parametric portfolio policies based on stock characteristics
 
-This repository implements and extends the portfolio optimization framework proposed by "Parametric Portfolio Policies: Exploiting Characteristics in the Cross-Section of Equity Returns" by Michael W. Brandt, Pedro Santa-Clara and Rossen Valkanov (BSV). It trains characteristic-driven portfolio policies on a processed U.S. equity panel, with optional macro interactions and an optional restricted JKP characteristic set. Portfolio weights are chosen to maximize mean-variance preferences, and can be either a linear function of stock characteristics (following BSV) or a neural network.
+This repository implements and extends the portfolio optimization framework proposed by "Parametric Portfolio Policies: Exploiting Characteristics in the Cross-Section of Equity Returns" by Michael W. Brandt, Pedro Santa-Clara and Rossen Valkanov (BSV). It trains characteristic-driven portfolio policies on a processed U.S. equity panel, with optional macro interactions and an optional restricted JKP characteristic set. Portfolio weights are chosen to maximize mean-variance preferences, and can be either a linear function of stock characteristics or a neural network.
 
 Data note: Raw data are not included. The equity panel is typically accessed via WRDS (credentials required).
 
@@ -91,10 +91,37 @@ Key policy-training knobs in scripts/train_policy.py:
 - EPOCHS_LINEAR / EPOCHS_NN
   Number of training epochs for the linear and neural policy versions.
 
+- TURNOVER_PENALTY
+  Adds a turnover regularization term to the objective:
+  `objective += TURNOVER_PENALTY * mean(turnover)`.
+
+- TRANSACTION_COST_MULTIPLIER
+  Controls transaction-cost intensity using one-way costs from:
+  `0.5 * bidaskhl_21d`.
+  `0.0` disables costs; `1.0` applies the baseline estimate.
+
+- TRANSACTION_COST_COL
+  Column used for spread-based transaction costs (default: `bidaskhl_21d`).
+
+- TRANSACTION_COST_WINSOR
+  Per-month winsorization quantiles for the cost column before conversion to costs.
+
+- OPTIMIZE_NET_OF_COSTS
+  If `True`, training/validation objective uses net returns (after costs).
+  If `False`, objective uses gross returns while still reporting net metrics.
+
 Optional hyperparameter tuning:
 
 - TUNE_HYPERPARAMS
   If True, performs a small grid search using LINEAR_GRID and NN_GRID.
+  Grids can include `lr`, `l1`, `l2`, and `turnover_penalty`.
+
+Transaction-cost timing and conventions:
+
+- Target `ret_exc_lead1m` is the return from end-of-month `t` to `t+1`.
+- Rebalance/cost is charged at `t` for the trade from `w_{t-1}` to `w_t`.
+- Entry and continuing names use month-`t` one-way spread.
+- Exit names use month-`t-1` one-way spread.
 
 ---
 
@@ -115,6 +142,19 @@ For each run, the script writes:
 
 - run_metadata__<feature_set>__<run_id>.json
   Full run configuration, script name, paths, and key package versions.
+
+Key performance metrics now include both gross and net variants:
+
+- Gross: `ann_mean`, `ann_vol`, `ann_sharpe_excess`
+- Net: `ann_mean_net`, `ann_vol_net`, `ann_sharpe_excess_net`
+- Trading frictions: `mean_turnover`, `mean_trading_cost`
+
+Training logs:
+
+- Epoch logs print objective diagnostics (`train_obj`, `val_obj`, Sharpe, etc.).
+- Yearly OOS logs print `SR_tot` (gross cumulative Sharpe).
+- When `TRANSACTION_COST_MULTIPLIER > 0`, yearly logs also print
+  `mean_net`, `SR_net(excess)`, `TC`, and `SR_net_tot`.
 
 ---
 

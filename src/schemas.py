@@ -42,7 +42,10 @@ class TrainConfig:
     policy_mode: Literal["long_only_softmax", "long_short_tilt"] = "long_only_softmax"
     gross_leverage: float | None = None
     turnover_penalty: float = 0.0
-    max_weight: float | None = None
+    transaction_cost_multiplier: float = 0.0
+    transaction_cost_col: str = "bidaskhl_21d"
+    transaction_cost_winsor: tuple[float, float] = (0.01, 0.99)
+    optimize_net_of_costs: bool = True
 
     # ---- Early stopping / scheduler ----
     patience: int = 10

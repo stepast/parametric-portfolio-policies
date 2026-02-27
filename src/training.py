@@ -48,6 +48,20 @@ def l2_penalty_no_bias(model: torch.nn.Module) -> torch.Tensor:
     return penalty
 
 
+def _apply_monthly_costs(
+    r: torch.Tensor,
+    r_exc: torch.Tensor,
+    tc: torch.Tensor | None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if tc is None or tc.numel() == 0 or r.numel() == 0:
+        return r, r_exc
+    costs = torch.zeros_like(r)
+    n = min(int(tc.numel()), max(int(r.numel()) - 1, 0))
+    if n > 0:
+        costs[1 : 1 + n] = tc[:n]
+    return r - costs, r_exc - costs
+
+
 # ---------------------------------------------------------------------
 # Training
 # ---------------------------------------------------------------------
@@ -100,16 +114,24 @@ def train_one_split_policy(
         model.train()
         opt.zero_grad(set_to_none=True)
 
-        r_train, r_train_exc, _ = run_model_on_batches(
+        use_tc_in_objective = bool(cfg.optimize_net_of_costs) and float(cfg.transaction_cost_multiplier) > 0.0
+        use_turnover_terms = (float(cfg.turnover_penalty) > 0.0) or use_tc_in_objective
+        r_train, r_train_exc, to_train, tc_train = run_model_on_batches(
             model,
             train_batches,
             policy_mode=cfg.policy_mode,
             gross_leverage=cfg.gross_leverage,
-            compute_turnover=False,
+            compute_turnover=use_turnover_terms,
+            transaction_cost_multiplier=float(cfg.transaction_cost_multiplier),
         )
+        r_train_net, r_train_exc_net = _apply_monthly_costs(r_train, r_train_exc, tc_train)
+        r_train_obj_exc = r_train_exc_net if bool(cfg.optimize_net_of_costs) else r_train_exc
 
         # Optimize on excess returns for consistency with evaluation
-        train_obj = mean_variance_loss(r_train_exc, risk_aversion=float(cfg.risk_aversion))
+        train_obj = mean_variance_loss(r_train_obj_exc, risk_aversion=float(cfg.risk_aversion))
+        turn_pen = torch.zeros((), device=r_train.device)
+        if float(cfg.turnover_penalty) > 0.0 and to_train is not None and to_train.numel() > 0:
+            turn_pen = float(cfg.turnover_penalty) * to_train.mean()
 
         pen_l1 = torch.zeros((), device=r_train.device)
         pen_l2 = torch.zeros((), device=r_train.device)
@@ -118,21 +140,26 @@ def train_one_split_policy(
         if cfg.l2 > 0.0:
             pen_l2 = cfg.l2 * l2_penalty_no_bias(model)
 
-        loss_total = train_obj + pen_l1 + pen_l2
+        loss_total = train_obj + turn_pen + pen_l1 + pen_l2
         loss_total.backward()
         opt.step()
 
         # ----- VALIDATION -----
         model.eval()
         with torch.no_grad():
-            r_val, r_val_exc, _ = run_model_on_batches(
+            r_val, r_val_exc, to_val, tc_val = run_model_on_batches(
                 model,
                 val_batches,
                 policy_mode=cfg.policy_mode,
                 gross_leverage=cfg.gross_leverage,
-                compute_turnover=False,
+                compute_turnover=use_turnover_terms,
+                transaction_cost_multiplier=float(cfg.transaction_cost_multiplier),
             )
-            val_obj_t = mean_variance_loss(r_val_exc, risk_aversion=float(cfg.risk_aversion))
+            _, r_val_exc_net = _apply_monthly_costs(r_val, r_val_exc, tc_val)
+            r_val_obj_exc = r_val_exc_net if bool(cfg.optimize_net_of_costs) else r_val_exc
+            val_obj_t = mean_variance_loss(r_val_obj_exc, risk_aversion=float(cfg.risk_aversion))
+            if float(cfg.turnover_penalty) > 0.0 and to_val is not None and to_val.numel() > 0:
+                val_obj_t = val_obj_t + float(cfg.turnover_penalty) * to_val.mean()
             val_obj = float(val_obj_t.detach().cpu().item())
             
             if scheduler is not None and np.isfinite(val_obj):
@@ -140,8 +167,8 @@ def train_one_split_policy(
 
         # ----- LOGGING -----
         if train_verbose and (epoch % int(log_every) == 0 or epoch == int(cfg.epochs) - 1):
-            r_tr_exc_np = r_train_exc.detach().cpu().numpy()
-            r_val_exc_np = r_val_exc.detach().cpu().numpy()
+            r_tr_exc_np = r_train_obj_exc.detach().cpu().numpy()
+            r_val_exc_np = r_val_obj_exc.detach().cpu().numpy()
 
             print(
                 f"Epoch {epoch:03d} | "
@@ -172,16 +199,20 @@ def train_one_split_policy(
     # final validation metrics with best weights
     model.eval()
     with torch.no_grad():
-        r_val, r_val_exc, _ = run_model_on_batches(
+        r_val, r_val_exc, _, tc_val = run_model_on_batches(
             model,
             val_batches,
             policy_mode=cfg.policy_mode,
             gross_leverage=cfg.gross_leverage,
-            compute_turnover=False,
+            compute_turnover=bool(cfg.optimize_net_of_costs) and float(cfg.transaction_cost_multiplier) > 0.0,
+            transaction_cost_multiplier=float(cfg.transaction_cost_multiplier),
         )
+        r_val_net, r_val_exc_net = _apply_monthly_costs(r_val, r_val_exc, tc_val)
+        r_val_obj = r_val_net if bool(cfg.optimize_net_of_costs) else r_val
+        r_val_exc_obj = r_val_exc_net if bool(cfg.optimize_net_of_costs) else r_val_exc
 
-    r_val_np = r_val.detach().cpu().numpy()
-    r_val_exc_np = r_val_exc.detach().cpu().numpy()
+    r_val_np = r_val_obj.detach().cpu().numpy()
+    r_val_exc_np = r_val_exc_obj.detach().cpu().numpy()
 
     val_metrics = {
         "val_obj": float(best_val_obj),
@@ -208,6 +239,7 @@ def tune_policy_hyperparams(
     lr_grid: Sequence[float],
     l1_grid: Sequence[float],
     l2_grid: Sequence[float],
+    turnover_penalty_grid: Sequence[float],
     seed: int,
     train_verbose: bool = False,
     log_every: int = 1,
@@ -216,8 +248,8 @@ def tune_policy_hyperparams(
     Grid search hyperparameters by MINIMIZING validation objective.
 
     """
-    if len(lr_grid) == 0 or len(l1_grid) == 0 or len(l2_grid) == 0:
-        raise ValueError("lr_grid, l1_grid, l2_grid must be non-empty when tuning.")
+    if len(lr_grid) == 0 or len(l1_grid) == 0 or len(l2_grid) == 0 or len(turnover_penalty_grid) == 0:
+        raise ValueError("lr_grid, l1_grid, l2_grid, turnover_penalty_grid must be non-empty when tuning.")
 
     best_cfg = base_cfg
     best_val_metrics: dict[str, float] = {}
@@ -227,27 +259,34 @@ def tune_policy_hyperparams(
     for lr in lr_grid:
         for l1 in l1_grid:
             for l2 in l2_grid:
-                trial += 1
+                for turnover_penalty in turnover_penalty_grid:
+                    trial += 1
 
-                # Preserve everything, override only tuned fields
-                cfg_try = replace(base_cfg, lr=float(lr), l1=float(l1), l2=float(l2))
+                    # Preserve everything, override only tuned fields
+                    cfg_try = replace(
+                        base_cfg,
+                        lr=float(lr),
+                        l1=float(l1),
+                        l2=float(l2),
+                        turnover_penalty=float(turnover_penalty),
+                    )
 
-                model, val_metrics = train_one_split_policy(
-                    build_model=build_model,
-                    train_batches=train_batches,
-                    val_batches=val_batches,
-                    cfg=cfg_try,
-                    seed=int(seed + trial),
-                    train_verbose=train_verbose,
-                    log_every=log_every,
-                )
-                del model
+                    model, val_metrics = train_one_split_policy(
+                        build_model=build_model,
+                        train_batches=train_batches,
+                        val_batches=val_batches,
+                        cfg=cfg_try,
+                        seed=int(seed + trial),
+                        train_verbose=train_verbose,
+                        log_every=log_every,
+                    )
+                    del model
 
-                val_obj = float(val_metrics["val_obj"])
-                if val_obj < best_val_obj:
-                    best_val_obj = val_obj
-                    best_cfg = cfg_try
-                    best_val_metrics = val_metrics
+                    val_obj = float(val_metrics["val_obj"])
+                    if val_obj < best_val_obj:
+                        best_val_obj = val_obj
+                        best_cfg = cfg_try
+                        best_val_metrics = val_metrics
 
     return best_cfg, best_val_metrics
 
@@ -303,7 +342,10 @@ def run_portfolio_policy_with_features(
     # Full OOS monthly series for global metrics
     oos_r: list[float] = []
     oos_r_exc: list[float] = []
+    oos_r_net: list[float] = []
+    oos_r_exc_net: list[float] = []
     oos_to: list[float] = []
+    oos_tc: list[float] = []
     
     train_years = base_cfg.train_years
     val_years = base_cfg.val_years
@@ -348,13 +390,28 @@ def run_portfolio_policy_with_features(
         label_col = "label_eom" if "label_eom" in df.columns else None
         ret_exc_col = "ret_exc_lead1m"
         train_batches = make_monthly_batches(
-            df_train, X_train, label_date_col=label_col, ret_exc_next_col=ret_exc_col
+            df_train,
+            X_train,
+            label_date_col=label_col,
+            ret_exc_next_col=ret_exc_col,
+            transaction_cost_col=base_cfg.transaction_cost_col,
+            transaction_cost_winsor=base_cfg.transaction_cost_winsor,
         )
         val_batches = make_monthly_batches(
-            df_val, X_val, label_date_col=label_col, ret_exc_next_col=ret_exc_col
+            df_val,
+            X_val,
+            label_date_col=label_col,
+            ret_exc_next_col=ret_exc_col,
+            transaction_cost_col=base_cfg.transaction_cost_col,
+            transaction_cost_winsor=base_cfg.transaction_cost_winsor,
         )
         test_batches = make_monthly_batches(
-            df_test, X_test, label_date_col=label_col, ret_exc_next_col=ret_exc_col
+            df_test,
+            X_test,
+            label_date_col=label_col,
+            ret_exc_next_col=ret_exc_col,
+            transaction_cost_col=base_cfg.transaction_cost_col,
+            transaction_cost_winsor=base_cfg.transaction_cost_winsor,
         )
 
         def build_model() -> torch.nn.Module:
@@ -371,6 +428,7 @@ def run_portfolio_policy_with_features(
             lr_grid = [float(x) for x in grids.get("lr", [base_cfg.lr])]
             l1_grid = [float(x) for x in grids.get("l1", [base_cfg.l1])]
             l2_grid = [float(x) for x in grids.get("l2", [base_cfg.l2])]
+            turnover_penalty_grid = [float(x) for x in grids.get("turnover_penalty", [base_cfg.turnover_penalty])]
 
             cfg_used, val_info = tune_policy_hyperparams(
                 build_model=build_model,
@@ -380,6 +438,7 @@ def run_portfolio_policy_with_features(
                 lr_grid=lr_grid,
                 l1_grid=l1_grid,
                 l2_grid=l2_grid,
+                turnover_penalty_grid=turnover_penalty_grid,
                 seed=int(seed + 100_000 * test_year),
             )
 
@@ -387,6 +446,7 @@ def run_portfolio_policy_with_features(
                 "lr": float(cfg_used.lr),
                 "l1": float(cfg_used.l1),
                 "l2": float(cfg_used.l2),
+                "turnover_penalty": float(cfg_used.turnover_penalty),
             }
 
         # -------------------------
@@ -417,20 +477,22 @@ def run_portfolio_policy_with_features(
         # -------------------------
         with torch.no_grad():
             if int(ensemble_n) == 1:
-                r_test, r_test_exc, to_test = run_model_on_batches(
+                r_test, r_test_exc, to_test, tc_test = run_model_on_batches(
                     models[0],
                     test_batches,
                     policy_mode=cfg_used.policy_mode,
                     gross_leverage=cfg_used.gross_leverage,
                     compute_turnover=True,
+                    transaction_cost_multiplier=float(cfg_used.transaction_cost_multiplier),
                 )
             else:
-                r_test, r_test_exc, to_test = run_ensemble_on_batches(
+                r_test, r_test_exc, to_test, tc_test = run_ensemble_on_batches(
                     models,
                     test_batches,
                     policy_mode=cfg_used.policy_mode,
                     gross_leverage=cfg_used.gross_leverage,
                     compute_turnover=True,
+                    transaction_cost_multiplier=float(cfg_used.transaction_cost_multiplier),
                 )
 
         # free models (important for GPU memory)
@@ -440,11 +502,19 @@ def run_portfolio_policy_with_features(
         r_np = r_test.detach().cpu().numpy()
         r_exc_np = r_test_exc.detach().cpu().numpy()
         to_np = to_test.detach().cpu().numpy() if to_test is not None else np.array([])
+        tc_np = tc_test.detach().cpu().numpy() if tc_test is not None else np.array([])
+        r_test_net, r_test_exc_net = _apply_monthly_costs(r_test, r_test_exc, tc_test)
+        r_net_np = r_test_net.detach().cpu().numpy()
+        r_exc_net_np = r_test_exc_net.detach().cpu().numpy()
 
         ann_mean = _ann_mean(r_np)
         ann_vol  = _ann_vol(r_np)
         ann_sr   = float(sharpe_ratio_from_excess(r_exc_np))
+        ann_mean_net = _ann_mean(r_net_np)
+        ann_vol_net = _ann_vol(r_net_np)
+        ann_sr_net = float(sharpe_ratio_from_excess(r_exc_net_np))
         mean_to  = float(np.mean(to_np)) if to_np.size else float("nan")
+        mean_tc  = float(np.mean(tc_np)) if tc_np.size else 0.0
 
         # training diagnostics (for ensemble: use member 0 or averages)
         if int(ensemble_n) == 1:
@@ -469,10 +539,16 @@ def run_portfolio_policy_with_features(
             "ann_mean": ann_mean,
             "ann_vol": ann_vol,
             "ann_sharpe_excess": ann_sr,
+            "ann_mean_net": ann_mean_net,
+            "ann_vol_net": ann_vol_net,
+            "ann_sharpe_excess_net": ann_sr_net,
             "mean_turnover": mean_to,
+            "mean_trading_cost": mean_tc,
             "lr": float(cfg_used.lr),
             "l1": float(cfg_used.l1),
             "l2": float(cfg_used.l2),
+            "turnover_penalty": float(cfg_used.turnover_penalty),
+            "transaction_cost_multiplier": float(cfg_used.transaction_cost_multiplier),
             "policy_mode": str(cfg_used.policy_mode),
             "gross_leverage": float(cfg_used.gross_leverage) if cfg_used.gross_leverage is not None else np.nan,
             "n_vars": int(K),
@@ -493,16 +569,29 @@ def run_portfolio_policy_with_features(
         # append global OOS series
         oos_r.extend(list(r_np))
         oos_r_exc.extend(list(r_exc_np))
+        oos_r_net.extend(list(r_net_np))
+        oos_r_exc_net.extend(list(r_exc_net_np))
         if to_np.size:
             oos_to.extend(list(to_np))
+        if tc_np.size:
+            oos_tc.extend(list(tc_np))
 
         SR_prov = sharpe_ratio_from_excess(np.asarray(oos_r_exc, dtype=np.float64))
+        SR_prov_net = sharpe_ratio_from_excess(np.asarray(oos_r_exc_net, dtype=np.float64))
 
         if verbose:
-            print(
+            base_msg = (
                 f"{test_year_label} {model_name} | mean={ann_mean:.3f} vol={ann_vol:.3f}  "
                 f"SR(excess)={ann_sr:.3f} TO={mean_to:.3f} SR_tot={SR_prov:.3f}"
             )
+            if float(cfg_used.transaction_cost_multiplier) > 0.0:
+                base_msg += (
+                    f" | mean_net={ann_mean_net:.3f} "
+                    f"SR_net(excess)={ann_sr_net:.3f} "
+                    f"TC={mean_tc:.4f} "
+                    f"SR_net_tot={SR_prov_net:.3f}"
+                )
+            print(base_msg)
 
     if not per_year_records:
         raise ValueError("No test years were evaluated (all splits were skipped).")
@@ -511,9 +600,18 @@ def run_portfolio_policy_with_features(
 
     oos_r_arr = np.asarray(oos_r, dtype=np.float64)
     oos_r_exc_arr = np.asarray(oos_r_exc, dtype=np.float64)
+    oos_r_net_arr = np.asarray(oos_r_net, dtype=np.float64)
+    oos_r_exc_net_arr = np.asarray(oos_r_exc_net, dtype=np.float64)
     oos_to_arr = np.asarray(oos_to, dtype=np.float64) if len(oos_to) else None
+    oos_tc_arr = np.asarray(oos_tc, dtype=np.float64) if len(oos_tc) else None
 
     overall = _compute_overall_metrics(oos_r_arr, oos_r_exc_arr, oos_to_arr)
+    overall["ann_mean_net"] = _ann_mean(oos_r_net_arr)
+    overall["ann_vol_net"] = _ann_vol(oos_r_net_arr)
+    overall["ann_sharpe_excess_net"] = float(sharpe_ratio_from_excess(oos_r_exc_net_arr))
+    overall["mean_trading_cost"] = float(np.mean(oos_tc_arr)) if oos_tc_arr is not None and oos_tc_arr.size else 0.0
+    overall["turnover_penalty"] = float(base_cfg.turnover_penalty)
+    overall["transaction_cost_multiplier"] = float(base_cfg.transaction_cost_multiplier)
 
     out: dict[str, Any] = {"per_year": per_year, "overall": overall}
     if tune_hyperparams:

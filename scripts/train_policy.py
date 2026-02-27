@@ -54,23 +54,25 @@ EPOCHS_NN = 200
 
 POLICY_MODE = "long_short_tilt"
 GROSS_LEVERAGE = 2.0
+TURNOVER_PENALTY = 0.0
+TRANSACTION_COST_MULTIPLIER = 1.0
+TRANSACTION_COST_COL = "bidaskhl_21d"
+TRANSACTION_COST_WINSOR = (0.01, 0.99)
+OPTIMIZE_NET_OF_COSTS = True
 
 TUNE_HYPERPARAMS = False
 LINEAR_GRID = {
     "lr": [1e-2, 3e-3],
     "l1": [0.0, 1e-6, 1e-5, 1e-4],
     "l2": [0.0, 1e-6, 1e-5],
+    "turnover_penalty": [TURNOVER_PENALTY],
 }
 NN_GRID = {
     "lr": [1e-3, 3e-4],
     "l1": [0.0, 1e-7, 1e-6],
     "l2": [0.0, 1e-6, 1e-5],
+    "turnover_penalty": [TURNOVER_PENALTY],
 }
-
-# Diagnostics / placebo
-SHUFFLE_RETURNS_WITHIN_MONTH = False
-RUN_ZERO_BASELINE = False
-AUDIT_ALIGNMENT = False
 
 def load_jkp_characteristics(raw_dir: Path) -> list[str]:
     """Load JKP characteristic list from Factor_Details.xlsx."""
@@ -110,7 +112,6 @@ def main() -> None:
         f"mktcap_above_p{int(SIZE_FILTER_QUANTILE*100)}__"
         f"{'macro_int' if MACRO_INTERACTIONS else 'no_macro_int'}"
     )
-
 
     print("Project root:", REPO_ROOT)
     print("Raw dir      :", raw_dir)
@@ -198,7 +199,6 @@ def main() -> None:
         feature_cols=feature_cols,
         target_col = "ret_exc_lead1m",
         required_cols = ["ret_exc_lead1m"],
-        filter_on_target=False,
     )
     
     assert len(df_clean) == X.shape[0] == y.shape[0], "X/y/df_clean misalignment"
@@ -244,6 +244,11 @@ def main() -> None:
     print("Policy mode        :", POLICY_MODE)
     print("Gross leverage     :", GROSS_LEVERAGE)
     print("Risk aversion      :", RISK_AVERSION)
+    print("Turnover penalty   :", TURNOVER_PENALTY)
+    print("TC multiplier      :", TRANSACTION_COST_MULTIPLIER)
+    print("TC column          :", TRANSACTION_COST_COL)
+    print("TC winsor          :", TRANSACTION_COST_WINSOR)
+    print("Optimize net obj   :", OPTIMIZE_NET_OF_COSTS)
 
     # -------------------------------------------------------------------
     # Run policies 
@@ -266,6 +271,11 @@ def main() -> None:
         lr=1e-3,
         l1=0.0,
         l2=0.0,
+        turnover_penalty=TURNOVER_PENALTY,
+        transaction_cost_multiplier=TRANSACTION_COST_MULTIPLIER,
+        transaction_cost_col=TRANSACTION_COST_COL,
+        transaction_cost_winsor=TRANSACTION_COST_WINSOR,
+        optimize_net_of_costs=OPTIMIZE_NET_OF_COSTS,
     )
 
     res_lin = run_portfolio_policy_with_features(
@@ -292,6 +302,11 @@ def main() -> None:
         lr=1e-3,
         l1=0.0,
         l2=0.0,
+        turnover_penalty=TURNOVER_PENALTY,
+        transaction_cost_multiplier=TRANSACTION_COST_MULTIPLIER,
+        transaction_cost_col=TRANSACTION_COST_COL,
+        transaction_cost_winsor=TRANSACTION_COST_WINSOR,
+        optimize_net_of_costs=OPTIMIZE_NET_OF_COSTS,
     )
 
     res_nn = run_portfolio_policy_with_features(
@@ -332,6 +347,9 @@ def main() -> None:
     summary_df["risk_aversion"] = RISK_AVERSION
     summary_df["gross_leverage"] = GROSS_LEVERAGE
     summary_df["tune_hyperparams"] = TUNE_HYPERPARAMS
+    summary_df["turnover_penalty"] = TURNOVER_PENALTY
+    summary_df["transaction_cost_multiplier"] = TRANSACTION_COST_MULTIPLIER
+    summary_df["optimize_net_of_costs"] = OPTIMIZE_NET_OF_COSTS
     
     summary_df["n_obs"] = n_obs
     summary_df["min_eom"] = str(min_date)
@@ -362,6 +380,11 @@ def main() -> None:
             "policy_mode": POLICY_MODE,
             "gross_leverage": GROSS_LEVERAGE,
             "tune_hyperparams": TUNE_HYPERPARAMS,
+            "turnover_penalty": TURNOVER_PENALTY,
+            "transaction_cost_multiplier": TRANSACTION_COST_MULTIPLIER,
+            "transaction_cost_col": TRANSACTION_COST_COL,
+            "transaction_cost_winsor": TRANSACTION_COST_WINSOR,
+            "optimize_net_of_costs": OPTIMIZE_NET_OF_COSTS,
        },
     }
     meta_path = save_run_metadata(run_metadata, feature_set=feature_set_name, run_id=run_id)
@@ -384,9 +407,22 @@ def main() -> None:
                 "risk_aversion",
                 "policy_mode",
                 "gross_leverage",
-                "tune_hyperparams"                
+                "tune_hyperparams",
+                "turnover_penalty",
+                "transaction_cost_multiplier",
+                "optimize_net_of_costs",
             ],
-            value_cols=["model", "ann_mean", "ann_vol", "ann_sharpe_excess", "mean_turnover"],
+            value_cols=[
+                "model",
+                "ann_mean",
+                "ann_vol",
+                "ann_sharpe_excess",
+                "ann_mean_net",
+                "ann_vol_net",
+                "ann_sharpe_excess_net",
+                "mean_turnover",
+                "mean_trading_cost",
+            ],
         )
     
     print("\nSaved summary results to:", summary_path.name)

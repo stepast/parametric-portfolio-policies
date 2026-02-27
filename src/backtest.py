@@ -15,9 +15,13 @@ def make_monthly_batches(
     id_col: str = "id",
     ret_next_col: str = "ret_lead1m",
     ret_exc_next_col: str = "ret_exc_lead1m",
+    transaction_cost_col: str | None = "bidaskhl_21d",
+    transaction_cost_winsor: tuple[float, float] = (0.01, 0.99),
 ) -> list[MonthlyBatch]:
     if len(df_split) != X_split.shape[0]:
         raise ValueError("df_split and X_split must have the same number of rows.")
+    if transaction_cost_col is not None and transaction_cost_col not in df_split.columns:
+        raise KeyError(f"transaction_cost_col '{transaction_cost_col}' not found in split DataFrame.")
 
     # Sort entire split by (date, id) once; keep alignment with X_split
     order = np.lexsort((df_split[id_col].to_numpy(), df_split[date_col].to_numpy()))
@@ -45,6 +49,24 @@ def make_monthly_batches(
         w_b_t = torch.as_tensor(w_b, dtype=torch.float32)
 
         ids = g[id_col].to_numpy()
+        tc_oneway_t: torch.Tensor | None = None
+        if transaction_cost_col is not None and transaction_cost_col in g.columns:
+            s = pd.to_numeric(g[transaction_cost_col], errors="coerce").to_numpy(dtype=np.float32)
+            s = np.where(np.isfinite(s), s, np.nan)
+
+            finite = np.isfinite(s)
+            if np.any(finite):
+                q_lo, q_hi = transaction_cost_winsor
+                lo = float(np.nanquantile(s, q_lo))
+                hi = float(np.nanquantile(s, q_hi))
+                s = np.clip(s, lo, hi)
+                med = float(np.nanmedian(s))
+                s = np.where(np.isfinite(s), s, med)
+            else:
+                s = np.zeros_like(s, dtype=np.float32)
+
+            s = np.maximum(s, 0.0).astype(np.float32, copy=False)
+            tc_oneway_t = torch.as_tensor(0.5 * s, dtype=torch.float32)
 
         label_date = None
         if label_date_col is not None and label_date_col in g.columns:
@@ -61,6 +83,7 @@ def make_monthly_batches(
             r_next=r_next_t,
             r_exc_next=r_exc_next_t,
             w_bench=w_b_t,
+            tc_oneway=tc_oneway_t,
         ))
 
     return batches
