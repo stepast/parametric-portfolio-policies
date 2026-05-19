@@ -31,7 +31,7 @@ def scores_to_weights(
     w_bench: torch.Tensor,
     *,
     mode: Literal["long_only_softmax", "long_short_tilt"] = "long_only_softmax",
-    gross_leverage: float | None = None,
+    short_budget: float | None = None,
     eps: float = 1e-12,
 ) -> torch.Tensor:
     scores = scores.view(-1)
@@ -50,32 +50,24 @@ def scores_to_weights(
         tilt = (scores - scores.mean()) / float(n)
         w = w_bench + tilt  # sums to 1 automatically
 
-        if gross_leverage is None:
+        if short_budget is None:
             return w
+        if short_budget <= 0:
+            raise ValueError("short_budget must be positive or None.")
 
-        L = gross_leverage
-        if L <= 0:
-            raise ValueError("gross_leverage must be positive or None.")
+        short_b = (-w_bench).clamp_min(0).sum()
+        if float(short_b) > float(short_budget) + 1e-12:
+            raise ValueError(
+                f"short_budget={short_budget} is below benchmark short side="
+                f"{float(short_b):.6f}. Infeasible."
+            )
 
-        gross_b = w_bench.abs().sum().item()
-        if L < gross_b - 1e-12:
-            raise ValueError(f"gross_leverage={L} is below benchmark gross={gross_b:.6f}. Infeasible.")
-
-        gross = w.abs().sum().item()
-        if gross <= L + 1e-12:
-            return w
-
-        lo, hi = 0.0, 1.0
-        for _ in range(40):
-            mid = 0.5 * (lo + hi)
-            w_mid = w_bench + mid * tilt
-            g_mid = w_mid.abs().sum().item()
-            if g_mid > L:
-                hi = mid
-            else:
-                lo = mid
-
-        return w_bench + lo * tilt
+        short_w = (-w).clamp_min(0).sum()
+        denom = (short_w - short_b).clamp_min(1e-12)
+        alpha = ((short_budget - short_b) / denom).clamp(0.0, 1.0)
+        binds = (short_w > short_budget).to(alpha.dtype)
+        alpha = binds * alpha + (1.0 - binds) * torch.ones_like(alpha)
+        return w_bench + alpha * tilt
 
     raise ValueError(f"Unknown mode: {mode!r}")
 
@@ -174,7 +166,7 @@ def run_model_on_batches(
     model,
     batches: list[MonthlyBatch],
     policy_mode: str = "long_only_softmax",
-    gross_leverage: float | None = None,
+    short_budget: float | None = None,
     compute_turnover: bool = True,
     transaction_cost_multiplier: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
@@ -194,7 +186,7 @@ def run_model_on_batches(
             scores,
             b.w_bench,
             mode=policy_mode,
-            gross_leverage=gross_leverage,
+            short_budget=short_budget,
         )
 
         valid_mask = torch.isfinite(b.r_next) & torch.isfinite(b.r_exc_next)
@@ -240,7 +232,7 @@ def run_ensemble_on_batches(
     batches: list[MonthlyBatch],
     *,
     policy_mode: str,
-    gross_leverage: float | None,
+    short_budget: float | None,
     compute_turnover: bool = True,
     transaction_cost_multiplier: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
@@ -271,7 +263,7 @@ def run_ensemble_on_batches(
             scores,
             b.w_bench,
             mode=policy_mode,
-            gross_leverage=gross_leverage,
+            short_budget=short_budget,
         )
 
         valid_mask = torch.isfinite(b.r_next) & torch.isfinite(b.r_exc_next)

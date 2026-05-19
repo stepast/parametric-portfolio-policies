@@ -85,8 +85,8 @@ Key policy-training knobs in scripts/train_policy.py:
 - POLICY_MODE
   Portfolio constraint / mapping mode (e.g., long-short tilt). See scripts/train_policy.py for supported values.
 
-- GROSS_LEVERAGE
-  Gross exposure constraint used by the policy.
+- SHORT_BUDGET
+  Maximum total short exposure (as a fraction of NAV) used by the policy.
 
 - EPOCHS_LINEAR / EPOCHS_NN
   Number of training epochs for the linear and neural policy versions.

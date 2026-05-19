@@ -40,7 +40,7 @@ class TrainConfig:
     weight_decay: float = 0.0
 
     policy_mode: Literal["long_only_softmax", "long_short_tilt"] = "long_only_softmax"
-    gross_leverage: float | None = None
+    short_budget: float | None = None
     turnover_penalty: float = 0.0
     transaction_cost_multiplier: float = 0.0
     transaction_cost_col: str = "bidaskhl_21d"

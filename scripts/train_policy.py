@@ -53,12 +53,12 @@ EPOCHS_LINEAR = 200
 EPOCHS_NN = 200
 
 POLICY_MODE = "long_short_tilt"
-GROSS_LEVERAGE = 2.0
+SHORT_BUDGET = 0.5
 TURNOVER_PENALTY = 0.0
 TRANSACTION_COST_MULTIPLIER = 1.0
 TRANSACTION_COST_COL = "bidaskhl_21d"
 TRANSACTION_COST_WINSOR = (0.01, 0.99)
-OPTIMIZE_NET_OF_COSTS = True
+OPTIMIZE_NET_OF_COSTS = False
 
 TUNE_HYPERPARAMS = False
 LINEAR_GRID = {
@@ -242,7 +242,7 @@ def main() -> None:
         f"test starts {TRAIN_CFG.test_start_year}"
     )
     print("Policy mode        :", POLICY_MODE)
-    print("Gross leverage     :", GROSS_LEVERAGE)
+    print("Short budget       :", SHORT_BUDGET)
     print("Risk aversion      :", RISK_AVERSION)
     print("Turnover penalty   :", TURNOVER_PENALTY)
     print("TC multiplier      :", TRANSACTION_COST_MULTIPLIER)
@@ -266,7 +266,7 @@ def main() -> None:
         TRAIN_CFG,
         risk_aversion=RISK_AVERSION,
         policy_mode=POLICY_MODE,
-        gross_leverage=GROSS_LEVERAGE,
+        short_budget=SHORT_BUDGET,
         epochs=EPOCHS_LINEAR,
         lr=1e-3,
         l1=0.0,
@@ -297,7 +297,7 @@ def main() -> None:
         TRAIN_CFG,
         risk_aversion=RISK_AVERSION,
         policy_mode=POLICY_MODE,
-        gross_leverage=GROSS_LEVERAGE,
+        short_budget=SHORT_BUDGET,
         epochs=EPOCHS_NN,
         lr=1e-3,
         l1=0.0,
@@ -345,7 +345,7 @@ def main() -> None:
 
     summary_df["policy_mode"] = POLICY_MODE
     summary_df["risk_aversion"] = RISK_AVERSION
-    summary_df["gross_leverage"] = GROSS_LEVERAGE
+    summary_df["short_budget"] = SHORT_BUDGET
     summary_df["tune_hyperparams"] = TUNE_HYPERPARAMS
     summary_df["turnover_penalty"] = TURNOVER_PENALTY
     summary_df["transaction_cost_multiplier"] = TRANSACTION_COST_MULTIPLIER
@@ -378,7 +378,7 @@ def main() -> None:
             "n_permno": n_permno,
             "risk_aversion": RISK_AVERSION,
             "policy_mode": POLICY_MODE,
-            "gross_leverage": GROSS_LEVERAGE,
+            "short_budget": SHORT_BUDGET,
             "tune_hyperparams": TUNE_HYPERPARAMS,
             "turnover_penalty": TURNOVER_PENALTY,
             "transaction_cost_multiplier": TRANSACTION_COST_MULTIPLIER,
@@ -406,7 +406,7 @@ def main() -> None:
                 "macro_interactions",
                 "risk_aversion",
                 "policy_mode",
-                "gross_leverage",
+                "short_budget",
                 "tune_hyperparams",
                 "turnover_penalty",
                 "transaction_cost_multiplier",

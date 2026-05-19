@@ -120,7 +120,7 @@ def train_one_split_policy(
             model,
             train_batches,
             policy_mode=cfg.policy_mode,
-            gross_leverage=cfg.gross_leverage,
+            short_budget=cfg.short_budget,
             compute_turnover=use_turnover_terms,
             transaction_cost_multiplier=float(cfg.transaction_cost_multiplier),
         )
@@ -151,7 +151,7 @@ def train_one_split_policy(
                 model,
                 val_batches,
                 policy_mode=cfg.policy_mode,
-                gross_leverage=cfg.gross_leverage,
+                short_budget=cfg.short_budget,
                 compute_turnover=use_turnover_terms,
                 transaction_cost_multiplier=float(cfg.transaction_cost_multiplier),
             )
@@ -203,7 +203,7 @@ def train_one_split_policy(
             model,
             val_batches,
             policy_mode=cfg.policy_mode,
-            gross_leverage=cfg.gross_leverage,
+            short_budget=cfg.short_budget,
             compute_turnover=bool(cfg.optimize_net_of_costs) and float(cfg.transaction_cost_multiplier) > 0.0,
             transaction_cost_multiplier=float(cfg.transaction_cost_multiplier),
         )
@@ -481,7 +481,7 @@ def run_portfolio_policy_with_features(
                     models[0],
                     test_batches,
                     policy_mode=cfg_used.policy_mode,
-                    gross_leverage=cfg_used.gross_leverage,
+                    short_budget=cfg_used.short_budget,
                     compute_turnover=True,
                     transaction_cost_multiplier=float(cfg_used.transaction_cost_multiplier),
                 )
@@ -490,7 +490,7 @@ def run_portfolio_policy_with_features(
                     models,
                     test_batches,
                     policy_mode=cfg_used.policy_mode,
-                    gross_leverage=cfg_used.gross_leverage,
+                    short_budget=cfg_used.short_budget,
                     compute_turnover=True,
                     transaction_cost_multiplier=float(cfg_used.transaction_cost_multiplier),
                 )
@@ -550,7 +550,7 @@ def run_portfolio_policy_with_features(
             "turnover_penalty": float(cfg_used.turnover_penalty),
             "transaction_cost_multiplier": float(cfg_used.transaction_cost_multiplier),
             "policy_mode": str(cfg_used.policy_mode),
-            "gross_leverage": float(cfg_used.gross_leverage) if cfg_used.gross_leverage is not None else np.nan,
+            "short_budget": float(cfg_used.short_budget) if cfg_used.short_budget is not None else np.nan,
             "n_vars": int(K),
             "ensemble_n": int(ensemble_n),
             # diagnostics from training
