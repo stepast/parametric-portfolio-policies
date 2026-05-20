@@ -211,7 +211,8 @@ def run_model_on_batches(
             short_budget=short_budget,
         )
 
-        r_list.append(_safe_portfolio_return(w, b.r_next))
+        r_t = _safe_portfolio_return(w, b.r_next)
+        r_list.append(r_t)
         r_exc_list.append(_safe_portfolio_return(w, b.r_exc_next))
 
         if compute_turnover:
@@ -226,8 +227,15 @@ def run_model_on_batches(
                         prev_ids, prev_w, prev_tc_oneway, b.ids, w, b.tc_oneway
                     )
                     tc_list.append(float(transaction_cost_multiplier) * tc)
+            valid = torch.isfinite(b.r_next)
+            r_safe = torch.where(valid, b.r_next, torch.zeros_like(b.r_next))
+            drift_factor = torch.where(
+                valid,
+                (1.0 + r_safe) / (1.0 + r_t),
+                torch.ones_like(r_safe),
+            )
             prev_ids = b.ids
-            prev_w = w
+            prev_w = w * drift_factor
             prev_tc_oneway = b.tc_oneway
 
     device = batches[0].X.device if len(batches) else torch.device("cpu")
@@ -281,7 +289,8 @@ def run_ensemble_on_batches(
             short_budget=short_budget,
         )
 
-        r_list.append(_safe_portfolio_return(w, b.r_next))
+        r_t = _safe_portfolio_return(w, b.r_next)
+        r_list.append(r_t)
         r_exc_list.append(_safe_portfolio_return(w, b.r_exc_next))
 
         if compute_turnover:
@@ -296,8 +305,15 @@ def run_ensemble_on_batches(
                         prev_ids, prev_w, prev_tc_oneway, b.ids, w, b.tc_oneway
                     )
                     tc_list.append(float(transaction_cost_multiplier) * tc)
+            valid = torch.isfinite(b.r_next)
+            r_safe = torch.where(valid, b.r_next, torch.zeros_like(b.r_next))
+            drift_factor = torch.where(
+                valid,
+                (1.0 + r_safe) / (1.0 + r_t),
+                torch.ones_like(r_safe),
+            )
             prev_ids = b.ids
-            prev_w = w
+            prev_w = w * drift_factor
             prev_tc_oneway = b.tc_oneway
 
     device = batches[0].X.device if len(batches) else torch.device("cpu")
