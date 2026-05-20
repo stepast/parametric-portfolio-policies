@@ -322,6 +322,7 @@ def main() -> None:
         tune_hyperparams=TUNE_HYPERPARAMS,
         tune_grids=NN_GRID,
         verbose=True,
+        ensemble_n=1
     )
     record("MLP", res_nn)
 
