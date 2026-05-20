@@ -78,6 +78,28 @@ def portfolio_return(weights: torch.Tensor, asset_returns: torch.Tensor) -> torc
     return (w * r).sum()
 
 
+def _safe_portfolio_return(
+    weights: torch.Tensor,
+    asset_returns: torch.Tensor,
+    eps: float = 1e-12,
+) -> torch.Tensor:
+    """Portfolio return that renormalizes over names with finite returns.
+
+    For names with NaN return, weight is redistributed pro-rata across the
+    valid universe rather than scoring those positions at 0%. Stays in-graph
+    via differentiable indexing / sum.
+    """
+    w = weights.view(-1)
+    r = asset_returns.view(-1)
+    valid = torch.isfinite(r)
+    if bool(valid.all()):
+        return (w * r).sum()
+    w_v = w * valid.to(w.dtype)
+    denom = w_v.sum().clamp_min(eps)
+    r_safe = torch.where(valid, r, torch.zeros_like(r))
+    return (w_v * r_safe).sum() / denom
+
+
 def turnover_by_id(
     prev_ids: np.ndarray,
     prev_w: torch.Tensor,
@@ -189,15 +211,8 @@ def run_model_on_batches(
             short_budget=short_budget,
         )
 
-        valid_mask = torch.isfinite(b.r_next) & torch.isfinite(b.r_exc_next)
-        if valid_mask.all():
-            r_list.append(portfolio_return(w, b.r_next))
-            r_exc_list.append(portfolio_return(w, b.r_exc_next))
-        else:
-            r_next_eff = torch.where(valid_mask, b.r_next, torch.zeros_like(b.r_next))
-            r_exc_eff = torch.where(valid_mask, b.r_exc_next, torch.zeros_like(b.r_exc_next))
-            r_list.append(portfolio_return(w, r_next_eff))
-            r_exc_list.append(portfolio_return(w, r_exc_eff))
+        r_list.append(_safe_portfolio_return(w, b.r_next))
+        r_exc_list.append(_safe_portfolio_return(w, b.r_exc_next))
 
         if compute_turnover:
             if prev_w is not None and prev_ids is not None:
@@ -266,15 +281,8 @@ def run_ensemble_on_batches(
             short_budget=short_budget,
         )
 
-        valid_mask = torch.isfinite(b.r_next) & torch.isfinite(b.r_exc_next)
-        if valid_mask.all():
-            r_list.append(portfolio_return(w, b.r_next))
-            r_exc_list.append(portfolio_return(w, b.r_exc_next))
-        else:
-            r_next_eff = torch.where(valid_mask, b.r_next, torch.zeros_like(b.r_next))
-            r_exc_eff = torch.where(valid_mask, b.r_exc_next, torch.zeros_like(b.r_exc_next))
-            r_list.append(portfolio_return(w, r_next_eff))
-            r_exc_list.append(portfolio_return(w, r_exc_eff))
+        r_list.append(_safe_portfolio_return(w, b.r_next))
+        r_exc_list.append(_safe_portfolio_return(w, b.r_exc_next))
 
         if compute_turnover:
             if prev_w is not None and prev_ids is not None:
