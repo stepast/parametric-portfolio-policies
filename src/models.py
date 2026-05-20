@@ -47,7 +47,11 @@ class MLPPolicy(nn.Module):
             layers.append(nn.Linear(prev_dim, hidden_dim))
             
             if use_batchnorm:
-                layers.append(nn.BatchNorm1d(hidden_dim))
+                # track_running_stats=False keeps BN computing per-batch
+                # statistics at eval time. Since our batch dimension IS the
+                # cross-section of stocks at month t, this gives per-month
+                # cross-sectional normalization in both train and eval modes.
+                layers.append(nn.BatchNorm1d(hidden_dim, track_running_stats=False))
             
             layers.append(nn.ReLU())
 
